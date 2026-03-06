@@ -583,80 +583,117 @@
 
   /* ── GALLERY / CAROUSEL ── */
   .gallery-section .section-header { margin-bottom: 2.5rem; }
+  /* ── COVERFLOW CAROUSEL ── */
   .carousel-wrapper {
     position: relative;
-    max-width: 700px;
+    width: 100%;
+    max-width: 1100px;
     margin: 0 auto;
+    padding: 20px 0 10px;
     overflow: hidden;
-    border-radius: 12px;
   }
   .carousel-track {
     display: flex;
-    transition: transform 0.5s cubic-bezier(.4,0,.2,1);
-    will-change: transform;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    position: relative;
+    height: 360px;
   }
   .carousel-slide {
-    min-width: 100%;
-    position: relative;
-    background: #0a0a0a;
+    position: absolute;
+    width: 260px;
+    height: 300px;
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.55s cubic-bezier(.4,0,.2,1),
+                opacity 0.55s ease,
+                box-shadow 0.55s ease,
+                z-index 0s;
+    background: #111;
   }
   .carousel-slide img {
     width: 100%;
-    height: 480px;
-    object-fit: contain;
+    height: 100%;
+    object-fit: cover;
     display: block;
-    background: #111;
+    pointer-events: none;
   }
   .slide-caption {
     position: absolute;
     bottom: 0; left: 0; right: 0;
-    background: linear-gradient(transparent, rgba(0,0,0,0.85));
+    background: linear-gradient(transparent, rgba(0,0,0,0.9));
     color: #fff;
-    padding: 1.5rem 1rem 1rem;
-    font-size: 0.95rem;
+    padding: 1.2rem 0.8rem 0.7rem;
+    font-size: 0.75rem;
     font-family: var(--mono);
     letter-spacing: 0.1em;
     text-transform: uppercase;
     text-align: center;
+    opacity: 0;
+    transition: opacity 0.3s;
   }
+  .carousel-slide.center .slide-caption { opacity: 1; }
+
+  /* Progress bar under center image */
+  .carousel-progress {
+    position: absolute;
+    bottom: -6px; left: 50%;
+    transform: translateX(-50%);
+    width: 260px;
+    height: 3px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .carousel-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--orange);
+    border-radius: 2px;
+    transition: width linear;
+  }
+
   .carousel-btn {
     position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
+    top: 50%; transform: translateY(-50%);
     background: rgba(255,87,0,0.85);
     color: #fff;
     border: none;
     border-radius: 50%;
-    width: 44px;
-    height: 44px;
-    font-size: 1.6rem;
-    line-height: 1;
+    width: 42px; height: 42px;
+    font-size: 1.5rem;
     cursor: pointer;
-    z-index: 10;
+    z-index: 20;
     transition: background .2s, transform .2s;
     display: flex; align-items: center; justify-content: center;
   }
   .carousel-btn:hover { background: var(--orange); transform: translateY(-50%) scale(1.1); }
-  .carousel-btn.prev { left: 12px; }
-  .carousel-btn.next { right: 12px; }
+  .carousel-btn.prev { left: 8px; }
+  .carousel-btn.next { right: 8px; }
+
   .carousel-dots {
     display: flex;
     justify-content: center;
     gap: 8px;
-    padding: 14px 0 4px;
-    background: #111;
+    padding: 18px 0 4px;
   }
   .dot {
-    width: 8px; height: 8px;
+    width: 7px; height: 7px;
     border-radius: 50%;
     background: #444;
     cursor: pointer;
     transition: background .2s, transform .2s;
   }
-  .dot.active { background: var(--orange); transform: scale(1.3); }
-  @media (max-width: 600px) {
-    .carousel-slide img { height: 280px; }
-    .carousel-wrapper { max-width: 100%; border-radius: 0; }
+  .dot.active { background: var(--orange); transform: scale(1.35); }
+
+  @media (max-width: 700px) {
+    .carousel-track { height: 240px; }
+    .carousel-slide { width: 170px; height: 200px; }
+    .carousel-progress { width: 170px; }
   }
 </style>
 </head>
@@ -887,6 +924,7 @@
       <div class="slide-caption">Luna Iluminada</div>
     </div>
     </div>
+    <div class="carousel-progress"><div class="carousel-progress-bar"></div></div>
     <button class="carousel-btn prev" aria-label="Anterior">&#8249;</button>
     <button class="carousel-btn next" aria-label="Siguiente">&#8250;</button>
     <div class="carousel-dots">
@@ -1345,35 +1383,133 @@
 
 <script>
 (function() {
-  const track = document.querySelector('.carousel-track');
-  if (!track) return;
-  const slides = document.querySelectorAll('.carousel-slide');
-  const dots = document.querySelectorAll('.dot');
-  let current = 0;
+  const wrapper = document.querySelector('.carousel-wrapper');
+  const slides = Array.from(document.querySelectorAll('.carousel-slide'));
+  const dots = Array.from(document.querySelectorAll('.dot'));
+  const progressBar = document.querySelector('.carousel-progress-bar');
+  const progressEl = document.querySelector('.carousel-progress');
   const total = slides.length;
+  let current = 0;
+  let autoTimer = null;
+  let progressTimer = null;
+  const INTERVAL = 3500; // ms between slides
 
-  function goTo(idx) {
-    current = (idx + total) % total;
-    track.style.transform = `translateX(-${current * 100}%)`;
+  // Layout config
+  // visible slots: -2, -1, 0(center), +1, +2  (5 visible)
+  // on mobile show 3 (-1, 0, +1)
+  function isMobile() { return window.innerWidth <= 700; }
+
+  function getSlotConfig() {
+    if (isMobile()) {
+      return [
+        { offset: -1, x: -190, scale: 0.72, opacity: 0.45, z: 1 },
+        { offset:  0, x:    0, scale: 1,    opacity: 1,    z: 5 },
+        { offset:  1, x:  190, scale: 0.72, opacity: 0.45, z: 1 },
+      ];
+    }
+    return [
+      { offset: -2, x: -460, scale: 0.58, opacity: 0.25, z: 1 },
+      { offset: -1, x: -250, scale: 0.78, opacity: 0.6,  z: 2 },
+      { offset:  0, x:    0, scale: 1,    opacity: 1,    z: 5 },
+      { offset:  1, x:  250, scale: 0.78, opacity: 0.6,  z: 2 },
+      { offset:  2, x:  460, scale: 0.58, opacity: 0.25, z: 1 },
+    ];
+  }
+
+  function render() {
+    const slots = getSlotConfig();
+    const visibleOffsets = new Set(slots.map(s => s.offset));
+
+    slides.forEach((slide, i) => {
+      const offset = ((i - current) % total + total) % total;
+      // Map offset to range [-total/2, total/2]
+      const centered = offset > total / 2 ? offset - total : offset;
+      const slot = slots.find(s => s.offset === centered);
+
+      slide.classList.toggle('center', centered === 0);
+
+      if (slot) {
+        slide.style.transform = `translateX(${slot.x}px) scale(${slot.scale})`;
+        slide.style.opacity = slot.opacity;
+        slide.style.zIndex = slot.z;
+        slide.style.display = 'block';
+        slide.style.boxShadow = centered === 0
+          ? '0 16px 48px rgba(255,87,0,0.35), 0 4px 16px rgba(0,0,0,0.6)'
+          : '0 4px 16px rgba(0,0,0,0.4)';
+        slide.style.outline = centered === 0 ? '2px solid rgba(255,87,0,0.5)' : 'none';
+      } else {
+        slide.style.opacity = 0;
+        slide.style.zIndex = 0;
+        slide.style.display = 'none';
+      }
+    });
+
     dots.forEach((d, i) => d.classList.toggle('active', i === current));
   }
 
-  document.querySelector('.carousel-btn.next').addEventListener('click', () => goTo(current + 1));
-  document.querySelector('.carousel-btn.prev').addEventListener('click', () => goTo(current - 1));
-  dots.forEach((d, i) => d.addEventListener('click', () => goTo(i)));
+  function goTo(idx) {
+    current = ((idx % total) + total) % total;
+    render();
+    resetProgress();
+  }
 
-  // Auto-advance every 4s
-  let timer = setInterval(() => goTo(current + 1), 4000);
-  track.parentElement.addEventListener('mouseenter', () => clearInterval(timer));
-  track.parentElement.addEventListener('mouseleave', () => { timer = setInterval(() => goTo(current + 1), 4000); });
+  // Progress bar
+  function startProgress() {
+    if (!progressBar) return;
+    progressEl.style.opacity = '1';
+    progressBar.style.transition = 'none';
+    progressBar.style.width = '0%';
+    // Force reflow
+    progressBar.offsetWidth;
+    progressBar.style.transition = `width ${INTERVAL}ms linear`;
+    progressBar.style.width = '100%';
+  }
+
+  function resetProgress() {
+    if (!progressBar) return;
+    progressBar.style.transition = 'none';
+    progressBar.style.width = '0%';
+    clearTimeout(progressTimer);
+    startProgress();
+  }
+
+  function startAuto() {
+    clearInterval(autoTimer);
+    autoTimer = setInterval(() => goTo(current + 1), INTERVAL);
+    startProgress();
+  }
+
+  function stopAuto() {
+    clearInterval(autoTimer);
+    if (progressBar) {
+      progressBar.style.transition = 'none';
+      progressBar.style.width = progressBar.offsetWidth + 'px'; // freeze
+      progressEl.style.opacity = '0';
+    }
+  }
+
+  // Init
+  render();
+  startAuto();
+
+  document.querySelector('.carousel-btn.next').addEventListener('click', () => { goTo(current + 1); });
+  document.querySelector('.carousel-btn.prev').addEventListener('click', () => { goTo(current - 1); });
+  dots.forEach((d, i) => d.addEventListener('click', () => goTo(i)));
+  slides.forEach((s, i) => s.addEventListener('click', () => goTo(i)));
+
+  wrapper.addEventListener('mouseenter', stopAuto);
+  wrapper.addEventListener('mouseleave', startAuto);
 
   // Touch swipe
   let startX = 0;
-  track.addEventListener('touchstart', e => { startX = e.touches[0].clientX; }, { passive: true });
-  track.addEventListener('touchend', e => {
+  wrapper.addEventListener('touchstart', e => { startX = e.touches[0].clientX; stopAuto(); }, { passive: true });
+  wrapper.addEventListener('touchend', e => {
     const diff = startX - e.changedTouches[0].clientX;
-    if (Math.abs(diff) > 50) goTo(current + (diff > 0 ? 1 : -1));
+    if (Math.abs(diff) > 40) goTo(current + (diff > 0 ? 1 : -1));
+    startAuto();
   });
+
+  window.addEventListener('resize', render);
 })();
 </script>
 </body>
